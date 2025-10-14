@@ -22,47 +22,42 @@ document.addEventListener('DOMContentLoaded', () => {
     let imgCounter = 1;
     let lastCursorPosition = 0;
     let isFocusMode = false;
-
-    const chatInputForm = document.querySelector('.chat-input-form');
+    let editingPlaceholder = null;
 
     // --- Event Listeners ---
-    // Prevent form submit from reloading the page
-    chatInputForm.addEventListener('submit', function(e) {
+    // Single send message handler
+    sendButton.addEventListener('click', (e) => {
         e.preventDefault();
-        e.stopPropagation();
         sendMessage();
-        return false;
     });
 
-    // Prevent send button click from reloading the page
-    sendButton.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        sendMessage();
-        return false;
-    });
-
-    // Add Enter key handler for textarea
-    messageInput.addEventListener('keydown', function(e) {
+    // Enter key handler for textarea
+    messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            e.stopPropagation();
             sendMessage();
-            return false;
         }
     });
 
-    messageInput.addEventListener('focusout', () => lastCursorPosition = messageInput.selectionStart);
+    messageInput.addEventListener('click', () => {
+        lastCursorPosition = messageInput.selectionStart;
+    });
+    
+    messageInput.addEventListener('keyup', () => {
+        lastCursorPosition = messageInput.selectionStart;
+    });
+
     messageInput.addEventListener('paste', handlePaste);
+    messageInput.addEventListener('input', updatePlaceholders);
 
     pasteCodeButton.addEventListener('click', (e) => {
         e.preventDefault();
-        codeModal.style.display = 'flex';
+        openCodeModal();
     });
     
     cancelCodeButton.addEventListener('click', (e) => {
         e.preventDefault();
-        codeModal.style.display = 'none';
+        closeCodeModal();
     });
     
     addCodeButton.addEventListener('click', (e) => {
@@ -71,8 +66,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Focus Mode Listeners
-    messageInput.addEventListener('click', enterFocusMode);
+    messageInput.addEventListener('focus', enterFocusMode);
     pageOverlay.addEventListener('click', exitFocusMode);
+
+    // Close modal on escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && codeModal.style.display === 'flex') {
+            closeCodeModal();
+        }
+    });
 
     // --- Focus Mode Functions ---
     function enterFocusMode() {
@@ -87,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isFocusMode = false;
         pageOverlay.classList.remove('visible');
         chatInput.classList.remove('input-focus');
+        messageInput.blur();
     }
 
     // --- Core Functions ---
@@ -94,14 +97,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Prevent multiple simultaneous sends
         if (sendButton.disabled) return;
         
-        sendButton.disabled = true;
         const messageText = messageInput.value.trim();
 
         if (messageText === '') {
             alert('Please enter a message.');
-            sendButton.disabled = false;
             return;
         }
+
+        sendButton.disabled = true;
 
         if (isFocusMode) exitFocusMode();
 
@@ -176,18 +179,149 @@ document.addEventListener('DOMContentLoaded', () => {
         codePreviewContainer.innerHTML = '';
     }
 
+    // --- Placeholder Management Functions ---
+    function updatePlaceholders() {
+        const currentText = messageInput.value;
+        const existingImgPlaceholders = currentText.match(/\[\[img\d+\]\]/g) || [];
+        const existingCodePlaceholders = currentText.match(/\[\[code\d+\]\]/g) || [];
+
+        const allExistingPlaceholders = [...existingImgPlaceholders, ...existingCodePlaceholders];
+        const newPlaceholderMap = {};
+        let newImgCounter = 1;
+        let newCodeCounter = 1;
+        let updatedText = currentText;
+
+        // Renumber and update placeholderMap
+        allExistingPlaceholders.forEach(oldPlaceholder => {
+            const type = oldPlaceholder.includes('img') ? 'img' : 'code';
+            const content = placeholderMap[oldPlaceholder];
+
+            if (content) {
+                let newPlaceholder;
+                if (type === 'img') {
+                    newPlaceholder = `[[img${newImgCounter++}]]`;
+                } else {
+                    newPlaceholder = `[[code${newCodeCounter++}]]`;
+                }
+                newPlaceholderMap[newPlaceholder] = content;
+                
+                // Replace in text if placeholder changed
+                if (oldPlaceholder !== newPlaceholder) {
+                    updatedText = updatedText.replace(oldPlaceholder, newPlaceholder);
+                }
+            }
+        });
+
+        // Update input only if text changed
+        if (updatedText !== currentText) {
+            const cursorPos = messageInput.selectionStart;
+            messageInput.value = updatedText;
+            messageInput.setSelectionRange(cursorPos, cursorPos);
+        }
+
+        placeholderMap = newPlaceholderMap;
+        imgCounter = newImgCounter;
+        codeCounter = newCodeCounter;
+
+        // Update previews
+        updatePreviewDisplay();
+    }
+
+    function updatePreviewDisplay() {
+        imagePreviewContainer.innerHTML = '';
+        codePreviewContainer.innerHTML = '';
+
+        const currentText = messageInput.value;
+        const imgRegex = /\[\[img(\d+)\]\]/g;
+        const codeRegex = /\[\[code(\d+)\]\]/g;
+
+        let match;
+
+        // Collect all image placeholders and their content
+        const currentImgPlaceholders = [];
+        while ((match = imgRegex.exec(currentText)) !== null) {
+            const placeholder = match[0];
+            const content = placeholderMap[placeholder];
+            if (content) {
+                currentImgPlaceholders.push({ placeholder, content });
+            }
+        }
+
+        // Collect all code placeholders and their content
+        const currentCodePlaceholders = [];
+        while ((match = codeRegex.exec(currentText)) !== null) {
+            const placeholder = match[0];
+            const content = placeholderMap[placeholder];
+            if (content) {
+                currentCodePlaceholders.push({ placeholder, content });
+            }
+        }
+
+        // Add image previews
+        currentImgPlaceholders.forEach(({ placeholder, content }) => {
+            addImagePreview(content, placeholder);
+        });
+
+        // Add code previews
+        currentCodePlaceholders.forEach(({ placeholder, content }) => {
+            addCodePreview(content, placeholder);
+        });
+    }
+
+    function deletePlaceholder(placeholder) {
+        // Remove from message input
+        messageInput.value = messageInput.value.replace(placeholder, '');
+        // Remove from placeholderMap
+        delete placeholderMap[placeholder];
+        // Trigger update to renumber and refresh previews
+        updatePlaceholders();
+    }
+
+    function editPlaceholder(placeholder, type) {
+        if (type === 'code') {
+            editingPlaceholder = placeholder;
+            codeInput.value = placeholderMap[placeholder];
+            codeModal.style.display = 'flex';
+            codeInput.focus();
+        } else if (type === 'img') {
+            if (confirm(`Are you sure you want to delete ${placeholder}?`)) {
+                deletePlaceholder(placeholder);
+            }
+        }
+    }
+
+    function openCodeModal() {
+        editingPlaceholder = null;
+        codeInput.value = '';
+        codeModal.style.display = 'flex';
+        codeInput.focus();
+    }
+
+    function closeCodeModal() {
+        codeModal.style.display = 'none';
+        codeInput.value = '';
+        editingPlaceholder = null;
+    }
+
     function addCodeFromModal() {
         const codeText = codeInput.value;
-        if (codeText.trim() === '') return;
+        if (codeText.trim() === '') {
+            alert('Please enter some code.');
+            return;
+        }
 
-        const placeholder = `[[code${codeCounter++}]]`;
-        placeholderMap[placeholder] = codeText;
-
-        insertPlaceholder(placeholder, lastCursorPosition);
-        addCodePreview(codeText, placeholder);
-
-        codeInput.value = '';
-        codeModal.style.display = 'none';
+        if (editingPlaceholder) {
+            // Update existing code placeholder
+            placeholderMap[editingPlaceholder] = codeText;
+        } else {
+            // Add new code placeholder
+            const placeholder = `[[code${codeCounter++}]]`;
+            placeholderMap[placeholder] = codeText;
+            insertPlaceholder(placeholder, lastCursorPosition);
+        }
+        
+        closeCodeModal();
+        updatePlaceholders();
     }
 
     function handlePaste(e) {
@@ -203,9 +337,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     placeholderMap[placeholder] = base64Url;
 
                     insertPlaceholder(placeholder, messageInput.selectionStart);
-                    addImagePreview(base64Url, placeholder);
+                    updatePlaceholders();
                 };
                 reader.readAsDataURL(blob);
+                break; // Only handle first image
             }
         }
     }
@@ -223,28 +358,67 @@ document.addEventListener('DOMContentLoaded', () => {
     function addImagePreview(url, placeholder) {
         const previewWrapper = document.createElement('div');
         previewWrapper.className = 'image-preview';
+        previewWrapper.id = `preview-${placeholder.replace(/[\[\]]/g, '')}`;
+        
         const img = document.createElement('img');
         img.src = url;
+        img.alt = placeholder;
+        
         const p = document.createElement('p');
-        p.innerText = placeholder;
+        p.textContent = placeholder;
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'preview-actions';
+
+        const editButton = document.createElement('button');
+        editButton.textContent = 'Delete';
+        editButton.onclick = () => deletePlaceholder(placeholder);
+
+        actionsDiv.appendChild(editButton);
+
         previewWrapper.appendChild(img);
         previewWrapper.appendChild(p);
+        previewWrapper.appendChild(actionsDiv);
         imagePreviewContainer.appendChild(previewWrapper);
     }
 
-    function addCodePreview(code, placeholder) {
-        const previewWrapper = document.createElement('div');
-        previewWrapper.className = 'code-preview';
-        const pre = document.createElement('pre');
-        pre.innerText = code;
-        const p = document.createElement('p');
-        p.innerText = placeholder;
-        previewWrapper.appendChild(pre);
-        previewWrapper.appendChild(p);
-        codePreviewContainer.appendChild(previewWrapper);
-    }
+function addCodePreview(code, placeholder) {
+    const previewWrapper = document.createElement('div');
+    previewWrapper.className = 'code-preview';
+    previewWrapper.id = `preview-${placeholder.replace(/[\[\]]/g, '')}`;
+    
+    const pre = document.createElement('pre');
+    pre.textContent = code;
+    
+    // Add click handler to expand/collapse code
+    pre.addEventListener('click', () => {
+        pre.classList.toggle('expanded');
+    });
+    
+    const p = document.createElement('p');
+    p.textContent = placeholder;
 
-    function appendMessage(text, sender) {
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'preview-actions';
+
+    const editButton = document.createElement('button');
+    editButton.textContent = 'Edit';
+    editButton.onclick = () => editPlaceholder(placeholder, 'code');
+    
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+    deleteButton.onclick = () => deletePlaceholder(placeholder);
+
+    actionsDiv.appendChild(editButton);
+    actionsDiv.appendChild(deleteButton);
+
+    previewWrapper.appendChild(pre);
+    previewWrapper.appendChild(p);
+    previewWrapper.appendChild(actionsDiv);
+    codePreviewContainer.appendChild(previewWrapper);
+}
+
+function appendMessage(text, sender) {
         const messageElement = document.createElement('div');
         messageElement.classList.add('message', `${sender}-message`);
         messageElement.textContent = text;
