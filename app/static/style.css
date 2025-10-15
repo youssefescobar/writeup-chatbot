@@ -667,7 +667,7 @@ body {
 .chat-input.input-focus .download-buttons {
     display: flex;
     flex-direction: row;
-    gap: 15px;
+    gap: 5px;
 }
 
 .chat-input.input-focus button {
