@@ -101,7 +101,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Prevent multiple simultaneous sends
         if (sendButton.disabled) return;
         
-        const messageText = messageInput.value.trim();
+    const messageText = messageInput.value.trim();
+    let messageToSend = messageText; // may be replaced if we extract code blocks
 
         if (messageText === '') {
             alert('Please enter a message.');
@@ -113,14 +114,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isFocusMode) exitFocusMode();
 
         appendMessage(messageText, 'user');
+
+        // --- Extract any triple-backtick fenced code blocks into placeholders ---
+        try {
+            const rawMessage = messageInput.value; // original text with possibly fenced code
+            const extraction = extractCodeBlocksFromText(rawMessage);
+            if (extraction.addedPlaceholders.length > 0) {
+                // Use the replaced text for sending and update previews
+                messageToSend = extraction.text.trim();
+                // Put the replaced text into the input briefly so updatePlaceholders can detect and render previews
+                messageInput.value = extraction.text;
+                // Let the existing renumbering/preview logic run
+                updatePlaceholders();
+            }
+        } catch (e) {
+            console.warn('Code extraction failed:', e);
+        }
+
+        // Clear the input (preserve previous behavior)
         messageInput.value = '';
         
         const loadingAnimation = showLoadingAnimation();
 
         const requestBody = {
-            steps: messageText,
+            steps: messageToSend,
         };
 
+        // Capture the placeholders as they'll be sent with this request
         lastSentPlaceholderMap = { ...placeholderMap };
 
         try {
@@ -359,6 +379,55 @@ document.addEventListener('DOMContentLoaded', () => {
         const newCursorPos = position + placeholder.length;
         messageInput.setSelectionRange(newCursorPos, newCursorPos);
         lastCursorPosition = newCursorPos;
+    }
+
+    /**
+     * Extract triple-backtick fenced code blocks from a text string.
+     * Replaces each fenced block with a placeholder like [[codeN]] and stores
+     * the raw code body in placeholderMap under that key.
+     * Returns { text: replacedText, addedPlaceholders: [...] }
+     * If there are unmatched fences, this function will return the original text and no placeholders.
+     */
+    function extractCodeBlocksFromText(text) {
+        if (!text || text.indexOf('```') === -1) return { text, addedPlaceholders: [] };
+
+        // Quick unmatched fence check: count occurrences of ```
+        const fenceCount = (text.match(/```/g) || []).length;
+        if (fenceCount % 2 !== 0) {
+            // Unmatched fence - don't attempt to extract
+            console.warn('Unmatched triple-backtick fence detected. Skipping extraction.');
+            return { text, addedPlaceholders: [] };
+        }
+
+        const codeBlockRegex = /```(?:([^\n]*)\n)?([\s\S]*?)```/g;
+        let match;
+        let lastIndex = 0;
+        let out = '';
+        const added = [];
+
+        while ((match = codeBlockRegex.exec(text)) !== null) {
+            const fullMatch = match[0];
+            const lang = match[1] ? match[1].trim() : null; // optional language
+            const codeBody = match[2];
+
+            // Append text before this match
+            out += text.substring(lastIndex, match.index);
+
+            // Create placeholder and store code (we store only code body for now)
+            const placeholder = `[[code${codeCounter++}]]`;
+            placeholderMap[placeholder] = codeBody;
+            added.push(placeholder);
+
+            // Insert placeholder into output
+            out += placeholder;
+
+            lastIndex = match.index + fullMatch.length;
+        }
+
+        // Append remaining text
+        out += text.substring(lastIndex);
+
+        return { text: out, addedPlaceholders: added };
     }
 
     function addImagePreview(url, placeholder) {
