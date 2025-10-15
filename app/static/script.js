@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatBox = document.getElementById('chat-box');
     const imagePreviewContainer = document.getElementById('image-previews');
     const codePreviewContainer = document.getElementById('code-previews');
+    const downloadMdButton = document.getElementById('download-md-button');
+    const downloadPackageButton = document.getElementById('download-package-button');
 
     // Modal elements
     const codeModal = document.getElementById('code-modal');
@@ -14,10 +16,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelCodeButton = document.getElementById('cancel-code-button');
     const codeInput = document.getElementById('code-input');
 
+
     // Focus mode elements
     const pageOverlay = document.getElementById('page-overlay');
 
     let placeholderMap = {};
+    let lastSentPlaceholderMap = {};
     let codeCounter = 1;
     let imgCounter = 1;
     let lastCursorPosition = 0;
@@ -116,6 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const requestBody = {
             steps: messageText,
         };
+
+        lastSentPlaceholderMap = { ...placeholderMap };
 
         try {
             const response = await fetch('/generate', {
@@ -441,4 +447,78 @@ function appendMessage(text, sender) {
             loadingAnimation.parentNode.removeChild(loadingAnimation);
         }
     }
+
+    // --- Download Functions ---
+    async function downloadMarkdown() {
+        const lastBotMessage = chatBox.querySelector('.bot-message:last-child');
+        if (!lastBotMessage) {
+            alert('No conversation to download.');
+            return;
+        }
+
+        const content = lastBotMessage.textContent;
+
+        try {
+            const response = await fetch('/download/markdown', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content }),
+            });
+
+            if (!response.ok) throw new Error('Failed to download Markdown file.');
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'writeup.md';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+        } catch (error) {
+            console.error('Error downloading Markdown:', error);
+            alert('Could not download the file.');
+        }
+    }
+
+    async function downloadPackage() {
+        const lastBotMessage = chatBox.querySelector('.bot-message:last-child');
+        if (!lastBotMessage) {
+            alert('No conversation to download.');
+            return;
+        }
+
+        const content = lastBotMessage.textContent;
+
+        try {
+            const response = await fetch('/download/package', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content, placeholders: lastSentPlaceholderMap }),
+            });
+
+            if (!response.ok) throw new Error('Failed to download package.');
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'writeup_package.zip';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+        } catch (error) {
+            console.error('Error downloading package:', error);
+            alert('Could not download the package.');
+        }
+    }
+
+    downloadMdButton.addEventListener('click', downloadMarkdown);
+    downloadPackageButton.addEventListener('click', downloadPackage);
 });

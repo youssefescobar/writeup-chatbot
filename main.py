@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AzureOpenAI
@@ -9,6 +9,9 @@ import json
 import re
 import os
 from dotenv import load_dotenv
+import zipfile
+from io import BytesIO
+import base64
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -70,6 +73,13 @@ class WriteupRequest(BaseModel):
     temperature: float = 0.4
     top_p: float = 0.9
 
+class MarkdownDownloadRequest(BaseModel):
+    content: str
+
+class PackageDownloadRequest(BaseModel):
+    content: str
+    placeholders: dict
+
 @app.get("/")
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -97,9 +107,7 @@ async def generate_writeup_stream(writeup_request: WriteupRequest):
     try:
         # ✅ Preprocess markdown
         processed_steps, image_mapping = preprocess_markdown_to_placeholders(writeup_request.steps)
-
-        print(processed_steps)
-
+        
         # Send preprocessed steps to model
         response = client.chat.completions.create(
             stream=True,
@@ -160,6 +168,78 @@ async def generate_writeup(writeup_request: WriteupRequest):
     return StreamingResponse(
         generate_writeup_stream(writeup_request),
         media_type="text/event-stream"
+    )
+
+@app.post("/download/markdown")
+async def download_markdown(request: MarkdownDownloadRequest):
+    mem_file = BytesIO()
+    mem_file.write(request.content.encode('utf-8'))
+    mem_file.seek(0)
+    
+    return Response(
+        mem_file.read(),
+        media_type="text/markdown",
+        headers={"Content-Disposition": "attachment; filename=writeup.md"}
+    )
+
+@app.post("/download/package")
+async def download_package(request: PackageDownloadRequest):
+    content = request.content
+    placeholders = request.placeholders
+    
+    zip_buffer = BytesIO()
+    
+    # Prepare replacements and assets first
+    replacements = {}
+    assets_to_zip = []
+    img_dir = "images/"
+
+    for placeholder, data in placeholders.items():
+        if placeholder.startswith("[[img"):
+            try:
+                # Extract image extension, default to png if not found
+                parts = data.split(';')[0].split('/')
+                img_extension = parts[1] if len(parts) > 1 else 'png'
+                
+                img_filename = f"{placeholder.strip('[]')}.{img_extension}"
+                img_path_in_zip = f"{img_dir}{img_filename}"
+                
+                # Use the placeholder name (e.g., "img1") as alt text
+                alt_text = placeholder.strip('[]')
+                replacements[re.escape(placeholder)] = f"![{alt_text}]({img_path_in_zip})"
+                
+                img_data = base64.b64decode(data.split(',')[1])
+                assets_to_zip.append((img_path_in_zip, img_data))
+
+            except (IndexError, ValueError) as e:
+                print(f"Could not process image placeholder {placeholder}: {e}")
+                replacements[re.escape(placeholder)] = f"[ERROR: Could not process image {placeholder}]"
+
+        elif placeholder.startswith("[[code"):
+            replacements[re.escape(placeholder)] = f"```\n{data}\n```"
+
+    # Perform all replacements at once using a single regex
+    if replacements:
+        pattern = re.compile("|".join(replacements.keys()))
+        
+        def replacer(match):
+            return replacements.get(re.escape(match.group(0)), match.group(0))
+
+        content = pattern.sub(replacer, content)
+
+    # Write assets and the modified markdown to the zip file
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_f:
+        for path_in_zip, asset_data in assets_to_zip:
+            zip_f.writestr(path_in_zip, asset_data)
+        
+        zip_f.writestr("writeup.md", content.encode('utf-8'))
+
+    zip_buffer.seek(0)
+    
+    return Response(
+        zip_buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=writeup_package.zip"}
     )
 
 if __name__ == "__main__":
