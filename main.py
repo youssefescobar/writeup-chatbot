@@ -206,7 +206,7 @@ async def download_package(request: PackageDownloadRequest):
                 
                 # Use the placeholder name (e.g., "img1") as alt text
                 alt_text = placeholder.strip('[]')
-                replacements[re.escape(placeholder)] = f"![{alt_text}]({img_path_in_zip})"
+                replacements[re.escape(placeholder)] = f"\n![{alt_text}]({img_path_in_zip})\n"
                 
                 img_data = base64.b64decode(data.split(',')[1])
                 assets_to_zip.append((img_path_in_zip, img_data))
