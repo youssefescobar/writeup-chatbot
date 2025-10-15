@@ -19,7 +19,7 @@ These instructions will get you a copy of the project up and running on your loc
 - Python 3.12 or higher
 - [uv](https://github.com/astral-sh/uv) - A fast Python package installer and resolver.
 
-### Installation
+### Install locally
 
 1.  **Clone the repository:**
 
@@ -63,6 +63,26 @@ uvicorn main:app --host localhost --port 3131 --reload
 ```
 
 The application will be available at `http://localhost:3131`.
+
+
+### Run using docker
+
+1. Create a `.env` file in the root of the project and add your API key:
+```
+    AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+```
+2. build the image using the Dockerfile
+```bash
+    docker build -t ctf-maker .
+```
+3. Run Container
+```bash
+    docker run -p 3131:3131 ctf-maker
+```
+4. Access the app at http://localhost:3131/
+    
+
+
 
 ## Project Structure
 
